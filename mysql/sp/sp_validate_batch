@@ -1,0 +1,53 @@
+drop PROCEDURE if exists sp_validate_batch
+/
+
+CREATE PROCEDURE sp_validate_batch
+(in p_id int)
+BEGIN
+DECLARE done INT DEFAULT FALSE;
+DECLARE v_id INT;
+DECLARE v_fn nvarchar(255) DEFAULT '';
+DECLARE v_ln nvarchar(255) DEFAULT '';
+DECLARE v_mn nvarchar(255) DEFAULT '';
+DECLARE v_out nvarchar(255) DEFAULT '';
+DECLARE v_g nchar(1) DEFAULT 'M';
+
+
+DECLARE cur1 CURSOR FOR SELECT id,ofn,oln,omn from tmp_names_to_check where  id=p_id or (p_id=0 and nfn is null);
+
+
+  DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+
+  OPEN cur1;
+
+  read_loop: LOOP
+    FETCH cur1 INTO v_id,v_fn,v_ln,v_mn;
+    IF done THEN
+      LEAVE read_loop;
+    END IF;
+    
+
+
+IF p_id>0 THEN 
+ SET v_g='G';
+select v_id,concat('-',v_fn,'-')fn  ,concat('-',v_ln,'-') ln,concat('-',v_mn,'-') mn;
+
+END IF; 
+    
+    call sp_validate_name(v_fn,v_ln,v_mn,v_g,v_out);
+    update tmp_names_to_check 
+    SET nfn=replace(JSON_EXTRACT(v_out,'$.fn'),'"',''),
+    nln=replace(JSON_EXTRACT(v_out,'$.ln'),'"',''),
+    nmn=replace(JSON_EXTRACT(v_out,'$.mn'),'"',''),
+    outt=v_out
+    where id=v_id;
+
+
+  END LOOP;
+
+  CLOSE cur1;
+
+
+
+END
+/
