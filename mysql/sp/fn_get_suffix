@@ -1,0 +1,35 @@
+drop function if exists fn_get_suffix
+/
+
+CREATE FUNCTION fn_get_suffix
+(
+ p_name NVARCHAR(255)
+ )
+  RETURNS NVARCHAR(255) DETERMINISTIC
+BEGIN
+
+DECLARE v_i int DEFAULT 1;
+DECLARE v_vowels nvarchar(30) DEFAULT N'аеёиоуыэюя';
+DECLARE v_s nvarchar(255);
+DECLARE v_found int DEFAULT 0;
+
+	set v_s=lower(REVERSE(p_name));
+
+	WHILE v_i<=CHAR_LENGTH(v_s) DO
+    IF LOCATE(SUBSTRING(v_s,v_i,1),v_vowels,1)>0  THEN
+
+					if  v_found=1 THEN
+						return RIGHT(p_name,v_i-1);
+					else
+						set v_found=1;
+					END IF;	
+		END IF;
+			SET v_i=v_i+1;
+		END WHILE;
+return '';
+
+END
+/
+select fn_get_suffix(N'маняша')
+/
+
