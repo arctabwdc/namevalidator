@@ -1,0 +1,59 @@
+drop function if exists fn_tokenize_name
+/
+
+CREATE FUNCTION fn_tokenize_name
+(
+ p_name NVARCHAR(255)
+ )
+  RETURNS JSON DETERMINISTIC
+BEGIN
+DECLARE v_st nvarchar(255) DEFAULT '';
+DECLARE v_name1 nvarchar(255) DEFAULT '';
+DECLARE v_name2 nvarchar(255) DEFAULT '';
+DECLARE v_name3 nvarchar(255) DEFAULT '';
+DECLARE v_name4 nvarchar(255) DEFAULT '';
+DECLARE v_first_space int;
+DECLARE v_stecond_space int;
+DECLARE v_third_space int;
+set v_st='';
+
+
+
+set p_name=trim(replace(replace(replace(lcase(p_name),' оглы','-оглы'),' кызы','-кызы'),'  ',' '));
+
+IF LOCATE(' ',p_name)=0 or p_name is null THEN
+  return JSON_ARRAY( p_name);
+END IF;
+
+
+set v_first_space =LOCATE(' ',p_name);
+set v_name1=SUBSTRING(p_name,1,v_first_space-1);
+set v_stecond_space =LOCATE(' ',p_name,v_first_space+1); 
+
+if v_stecond_space>0 THEN
+  set v_name2=SUBSTRING(p_name,v_first_space+1,v_stecond_space-v_first_space-1);
+  set v_third_space =LOCATE(' ',p_name,v_stecond_space+1); 
+  if v_third_space>0 THEN
+    set v_name3=SUBSTRING(p_name,v_stecond_space+1,v_third_space-v_stecond_space-1);
+    set v_name4=SUBSTRING(p_name,v_third_space+1,100);
+      set v_st= JSON_ARRAY( v_name1,  v_name2, v_name3, v_name4);
+  ELSE
+    set v_name3=SUBSTRING(p_name,v_stecond_space+1,100);
+  set v_st= JSON_ARRAY( v_name1,  v_name2, v_name3);
+  END IF;
+ELSE
+  set v_name2=SUBSTRING(p_name,v_first_space+1,100);
+  set v_st= JSON_ARRAY( v_name1,  v_name2);
+END IF;
+
+
+
+return v_st;
+END 
+/
+
+select fn_tokenize_name(' ваня') ,fn_tokenize_name('ваня ') , fn_tokenize_name('ваня Иванов')two , fn_tokenize_name('ваня Иванов  Ваньевич') tres,  fn_tokenize_name('МАРДЖАН БАХАДУР О') tres, fn_tokenize_name('ваня Иванов кызы оглы') quatro ;
+/
+
+
+
