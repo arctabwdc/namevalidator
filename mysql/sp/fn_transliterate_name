@@ -1,0 +1,28 @@
+drop function if exists fn_transliterate_name
+/
+CREATE FUNCTION fn_transliterate_name (
+p_name VARCHAR(255)
+)
+RETURNS varchar(255) DETERMINISTIC
+
+BEGIN
+
+DECLARE v_str nvarchar(255) DEFAULT '';
+
+
+/* Remove all special chars*/
+set v_str=LCASE(p_name);
+set v_str=REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(v_str,'yo',N'е'),'zh',N'ж'),'ch',N'ч'),'sch',N'щ'),'sh',N'ш'),'ts','ц'),'yu','ю'),'ya','я'),'a','а'),'b','б');
+set v_str=REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(v_str,'v','в'),'w','уи'),'g','г'),'d','д'),'e','е'),'f','ф'),'j','ж'),'q','к'),'k','к'),'x','кс');
+set v_str=REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(v_str,'z','з'),'i','и'),'y','й'),'l','л'),'m','м'),'n','н'),'o','о'),'p','п'),'r','р'),'c','ц');
+set v_str=REPLACE(REPLACE(REPLACE(REPLACE(v_str,'h','х'),'s','с'),'t','т'),'u','у');
+set v_str=RTRIM(LTRIM(REPLACE(REPLACE(v_str,'?','?'),'  ',' ')));
+
+return v_str;
+
+END
+/
+
+select fn_transliterate_name(N'abcdefghijklmnopqrstuvwxyz Викторович') res
+
+/
