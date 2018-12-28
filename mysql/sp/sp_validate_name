@@ -1,0 +1,223 @@
+drop PROCEDURE if exists sp_validate_name
+/
+
+CREATE PROCEDURE sp_validate_name
+(IN p_FirstName NVARCHAR(255),
+ IN p_LastName NVARCHAR(255),
+ IN p_MiddleName NVARCHAR(255),
+ IN p_Gender NVARCHAR(1),
+ OUT p_debugText NVARCHAR(255)
+ )
+BEGIN
+
+
+DECLARE v_fn nvarchar(255) DEFAULT '';
+DECLARE v_ln nvarchar(255) DEFAULT '';
+DECLARE v_mn nvarchar(255) DEFAULT '';
+DECLARE v_g nvarchar(255) DEFAULT '';
+DECLARE v_fullname nvarchar(255) DEFAULT '';
+DECLARE v_cleanname nvarchar(255) DEFAULT '';
+DECLARE v_suffix nvarchar(255) DEFAULT '';
+DECLARE v_cleanfullname nvarchar(255) DEFAULT '';
+DECLARE v_i int DEFAULT 0;
+DECLARE v_rows int DEFAULT 0;
+DECLARE v_total_fn_prob float DEFAULT 0;
+DECLARE v_total_ln_prob float DEFAULT 0;
+DECLARE v_total_mn_prob float DEFAULT 0;
+DECLARE v_fn_prob float DEFAULT 0;
+DECLARE v_ln_prob float DEFAULT 0;
+DECLARE v_mn_prob float DEFAULT 0;
+DECLARE v_name nvarchar(255);
+DECLARE v_type nvarchar(10);
+DECLARE v_found int DEFAULT 1;
+
+/* First tokenize all name parts - split into single words*/
+
+
+
+IF LOCATE(' ',p_FirstName)>0  THEN
+  Set v_fn=fn_tokenize_name(p_FirstName);
+ELSEIF  p_FirstName<>'' THEN
+  set v_fn=JSON_ARRAY(p_FirstName);
+ELSE
+  set v_fn=JSON_ARRAY();    
+END IF;
+
+IF LOCATE(' ',p_LastName)>0  THEN
+  Set v_ln=fn_tokenize_name(p_LastName);
+ELSEIF p_LastName<>'' THEN
+  set v_ln=JSON_ARRAY(p_LastName);
+ELSE
+  set v_ln=JSON_ARRAY();
+END IF;
+
+IF LOCATE(' ',p_MiddleName)>0  THEN
+  Set v_mn=fn_tokenize_name(p_MiddleName);
+ELSEIF  p_MiddleName<>'' THEN
+  set v_mn=JSON_ARRAY(p_MiddleName);
+ELSE
+  set v_mn=JSON_ARRAY();
+END IF;
+
+/* Combine tokens into single JSON array*/
+SET v_fullname=JSON_MERGE_PRESERVE(v_fn,v_ln,v_mn);
+SET v_i=0;
+
+
+/*Temp table for probability processing*/
+drop table if exists tmpref_name;
+drop table if exists tmpref_name_probs;
+drop table if exists tmpref_name_suffix;
+
+create temporary table tmpref_name engine=memory select *,1 is_fn,1 is_ln,1 is_mn from ref_name where name='';
+create temporary table tmpref_name_suffix engine=memory select * from ref_name_suffix where suffix='';
+create temporary table tmpref_name_probs engine=memory select name,'type' prob_type,100.0*100.0 prob,1 main from ref_name where name='';
+
+if p_gender='G' then
+  select v_fullname fullname;
+end if;
+
+/*Loop through all the words, clean them up and build temp tables*/
+WHILE v_i<JSON_LENGTH(v_fullname) DO
+    /*clean up special and extra characters*/
+    SET v_cleanname=fn_cleanup_name(JSON_EXTRACT(v_fullname,CONCAT('$[',v_i,']')));
+
+    if p_gender='V' then
+      select v_cleanname cleanname_loop;
+      end if;
+    
+    /*If it is empty after cleaning, remove from array*/    
+    if v_cleanname='' THEN
+      SET v_fullname=JSON_REMOVE(v_fullname,CONCAT('$[',v_i,']'));  
+    ELSE
+      /*Get probabilities, if they are not available, still insert a record*/
+      insert into tmpref_name select *,1 is_fn,1 is_ln,1 is_mn from ref_name where name=v_cleanname;
+      IF ROW_COUNT()>0 THEN
+        insert into tmpref_name_probs select name,'fn',firstname_prob,1 main from ref_name where name=v_cleanname;
+        insert into tmpref_name_probs select name,'ln',lastname_prob,1 main from ref_name where name=v_cleanname;      
+        insert into tmpref_name_probs select name,'mn',middlename_prob,1 main from ref_name where name=v_cleanname;
+      ELSE  
+        set v_suffix=fn_get_suffix(v_cleanname);
+
+        insert into tmpref_name_suffix select * from ref_name_suffix where suffix=v_suffix;
+        IF ROW_COUNT()>0 THEN        
+          insert into tmpref_name_probs select v_cleanname,'fn',firstname_prob/10000,1 main from ref_name_suffix where suffix=v_suffix;
+          insert into tmpref_name_probs select v_cleanname,'ln',lastname_prob/10000,1 main from ref_name_suffix where suffix=v_suffix;
+          insert into tmpref_name_probs select v_cleanname,'mn',middlename_prob/10000,1 main from ref_name_suffix where suffix=v_suffix;
+        ELSE
+          insert into tmpref_name_probs values( v_cleanname,'fn',-1,1);
+          insert into tmpref_name_probs values( v_cleanname,'ln',-1,1);
+          insert into tmpref_name_probs values( v_cleanname,'mn',-1,1);
+        end if;  
+      end if;      
+    
+
+      /*Put results into consolidated cleaned names array*/
+      IF v_cleanfullname='' THEN
+        SET v_cleanfullname=JSON_ARRAY(v_cleanname);
+      ELSE
+        SET v_cleanfullname=JSON_MERGE_PRESERVE(v_cleanfullname,JSON_ARRAY(v_cleanname));
+      END IF ;      
+    
+    END IF;  
+    SET v_i=v_i+1;
+END WHILE;
+
+
+
+/* Pick best probability*/
+
+WHILE v_found>0 DO
+  SET v_name='';
+  SET v_type='';
+  SELECT name,prob_type from tmpref_name_probs where main=1 and prob>0 order by prob desc  limit 1 into v_name ,v_type;
+  SET v_found=ROW_COUNT();
+
+if v_found>0 THEN
+  update tmpref_name_probs
+  set main= CASE  
+  WHEN name=v_name and  prob_type=v_type then 2  
+  WHEN (name=v_name or prob_type=v_type) then -1
+  ELSE 1  END
+  where main=1;
+ELSE
+/* See if anything is left*/
+  SELECT name,prob_type from tmpref_name_probs where main=1  order by prob desc  limit 1 into v_name ,v_type;
+   update tmpref_name_probs
+  set main= CASE  
+  WHEN name=v_name and  prob_type=v_type then 2  
+  WHEN (name=v_name or prob_type=v_type) then -1
+  ELSE 1  END
+  where main=1;
+END IF;  
+  
+IF p_gender='G' THEN
+  select v_name ,v_type;
+  select * from tmpref_name_probs order by prob desc;
+END IF;
+
+END WHILE;
+  if p_gender='G' THEN
+   select  * from tmpref_name_probs  order by prob desc;
+  end if; 
+  
+
+
+/*Total probs AMONG these names, that one OF THEM is specific name part*/
+SELECT sum(case when prob_type='fn' then prob else 0 end ),sum(case when prob_type='ln' then prob else 0 end ),sum(case when prob_type='mn' then prob else 0 end ) t from tmpref_name_probs limit 1 into v_total_fn_prob,v_total_ln_prob,v_total_mn_prob;
+IF v_total_fn_prob=0 THEN 
+  set v_total_fn_prob=-1; 
+end if;
+IF v_total_ln_prob=0 THEN 
+  set v_total_ln_prob=-1; 
+end if;
+IF v_total_mn_prob=0 THEN 
+  set v_total_mn_prob=-1; 
+end if;
+
+      
+/*Get confidence*/
+if p_gender='G' THEN
+  select * from tmpref_name;
+    select * from tmpref_name_suffix;
+
+END IF;
+
+/* Calcuulate percentages*/
+
+SET v_fn='',v_ln='',v_mn='',v_fn_prob=0,v_ln_prob=0,v_mn_prob=0;
+
+select name,prob from tmpref_name_probs where prob_type='fn' and main>0 limit 1 into v_fn,v_fn_prob;
+set v_fn_prob=100* v_fn_prob/v_total_fn_prob;
+set v_cleanfullname=JSON_OBJECT("fn",v_fn,"fn_prob", v_fn_prob);
+
+select name,prob from tmpref_name_probs where  prob_type='ln' and main>0 limit 1 into v_ln,v_ln_prob;
+set v_ln_prob=100*v_ln_prob/v_total_ln_prob;
+set v_cleanfullname=JSON_MERGE_PRESERVE(v_cleanfullname, JSON_OBJECT("ln",v_ln,"ln_prob", v_ln_prob));
+
+
+select name,prob from tmpref_name_probs where prob_type='mn' and main>0 limit 1 into v_mn,v_mn_prob;
+set v_mn_prob=100*v_mn_prob/v_total_mn_prob;
+set v_cleanfullname=JSON_MERGE_PRESERVE(v_cleanfullname, JSON_OBJECT("mn",v_mn,"mn_prob", v_mn_prob));
+
+
+if p_gender='G' THEN
+  select v_fn,v_ln,v_mn;
+    select * from tmpref_name_suffix;
+
+END IF;
+
+SET p_debugText=v_cleanfullname;
+
+
+/*select * from tmpref_name_suffix;*/
+END 
+/
+
+call sp_validate_name('Юлия','Григорова-Рудыковская','Валерьевна','G',@outtext) 
+
+
+
+/
+Select @outtext
+/
